@@ -73,3 +73,4 @@ class LogEntry(BaseModel):
                     "DEBUG",
                 ]
             })
+        extra = "allow"
