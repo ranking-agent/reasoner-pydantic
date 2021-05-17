@@ -1,69 +1,40 @@
 """Test alignment with OpenAPI schema."""
+from tests.utils import fill_http_refs, strip_extra_properties, update_ref_prefix
+import httpx
 import json
 
-import httpx
 import yaml
 
 from reasoner_pydantic import components
 
-
-class NormDecoder(json.JSONDecoder):
-    """JSON decoder that reduces schemas the their functional core."""
-
-    def __init__(self, *args, **kwargs):
-        """Initialize."""
-        json.JSONDecoder.__init__(
-            self,
-            object_hook=self.object_hook,
-            *args,
-            **kwargs,
-        )
-
-    def object_hook(self, dct):
-        """Object hook."""
-        if "$ref" in dct:
-            if dct["$ref"].startswith("#/definitions/"):
-                ref = "#/components/schemas" + dct["$ref"][13:]
-            else:
-                ref = dct["$ref"]
-            return {
-                "$ref": ref
-            }
-
-        # This is potentially problematic in general... #
-        if "anyOf" in dct:
-            dct["oneOf"] = dct.pop("anyOf")
-        #################################################
-
-        dct.pop("title", None)
-        dct.pop("description", None)
-        dct.pop("example", None)
-        dct.pop("externalDocs", None)
-        if dct.get("additionalProperties", None) is True:
-            dct.pop("additionalProperties")
-        if list(dct.keys()) == ["allOf"]:
-            if len(dct["allOf"]) == 1:
-                return dct["allOf"][0]
-        return dct
-
-
-response = httpx.get("https://raw.githubusercontent.com/NCATSTranslator/ReasonerAPI/master/TranslatorReasonerAPI.yaml")
+response = httpx.get("https://raw.githubusercontent.com/NCATSTranslator/ReasonerAPI/edeutsch-operations/TranslatorReasonerAPI.yaml")
 reference_schemas = yaml.load(
     response.text,
     Loader=yaml.FullLoader,
 )["components"]["schemas"]
+
+
+def preprocess_schema_object_hook(obj):
+    """Object hook for processing a schema into the correct format"""
+    obj = fill_http_refs(obj)
+    obj = update_ref_prefix(obj)
+    obj = strip_extra_properties(obj)
+    return obj
+
 reference_schemas = json.loads(
     json.dumps(reference_schemas),
-    cls=NormDecoder,
+    object_hook=preprocess_schema_object_hook,
 )
-
 
 def test_openapi():
     """Test alignment with OpenAPI schema."""
     for obj in components:
         print(obj.__name__)
 
-        schema = json.loads(obj.schema_json(), cls=NormDecoder)
+        schema = obj.schema_json(
+            ref_template = "#/components/schemas/{model}"
+        )
+        schema = json.loads(schema, object_hook = preprocess_schema_object_hook)
 
         schema.pop("definitions", None)
         try:
